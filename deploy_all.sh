@@ -51,8 +51,9 @@ ROCM_WHEEL_TAG="rocm721"           # vLLM wheel tag for ROCm 7.2.x
 echo ""
 echo "Step 1. System Preparation + ROCm ${ROCM_VERSION} (Ubuntu ${UBUNTU_VERSION})"
 sudo apt update
-sudo apt install -y python3 python3-venv python3-dev gcc g++ make git wget curl \
+sudo apt install -y python3 python3-venv python3-dev gcc g++ make git git-lfs wget curl \
                     apt-transport-https software-properties-common lsb-release gnupg
+					
 
 # ── ROCm GPG key ──────────────────────────────────────────────────────────────
 sudo mkdir --parents --mode=0755 /etc/apt/keyrings
