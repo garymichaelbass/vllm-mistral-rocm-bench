@@ -1,0 +1,28 @@
+
+
+# Python virtual environment
+vllm_env/
+
+# Downloaded model weights
+models/
+
+# Runtime artifacts
+bench_logs.jsonl
+metrics.db
+
+# Downloaded packages
+*.deb
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Optional OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Ignore system/IDE noise
+__pycache__/
+.DS_Store
+
+GithubInstructions.txt
