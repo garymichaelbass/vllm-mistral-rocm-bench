@@ -11,7 +11,7 @@ source vllm_env/bin/activate
 # `vllm serve` is the current recommended entry point (replaces
 # `python -m vllm.entrypoints.openai.api_server` used in older releases).
 vllm serve "$SCRIPT_DIR/models/Mistral-7B-Instruct-v0.2" \
-    --host 0.0.0.0 \
+    --host 127.0.0.1 \
     --port 8000 \
     --dtype bfloat16 \
     --max-model-len 4096 \

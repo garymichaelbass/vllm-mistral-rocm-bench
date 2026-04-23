@@ -18,6 +18,16 @@ if [[ "$UBUNTU_CODENAME" != "noble" && "$UBUNTU_CODENAME" != "jammy" ]]; then
     exit 1
 fi
 
+# ─────────────────────────────────────────────
+# Stop unattended-upgrades immediately — it grabs the apt lock on first boot
+# and will block every apt command below for 10-20 minutes if left running.
+# ─────────────────────────────────────────────
+echo "Stopping unattended-upgrades to free apt lock..."
+sudo systemctl stop unattended-upgrades
+sudo systemctl disable unattended-upgrades
+sudo killall apt apt-get unattended-upgrade 2>/dev/null || true
+sleep 2
+
 ROCM_VERSION="7.2.2"
 VLLM_VERSION="0.19.1"
 ROCM_WHEEL_TAG="rocm721"           # vLLM wheel tag for ROCm 7.2.x
@@ -52,8 +62,8 @@ echo ""
 echo "Step 1. System Preparation + ROCm ${ROCM_VERSION} (Ubuntu ${UBUNTU_VERSION})"
 sudo apt update
 sudo apt install -y python3 python3-venv python3-dev gcc g++ make git git-lfs wget curl \
-                    apt-transport-https software-properties-common lsb-release gnupg
-					
+                    apt-transport-https software-properties-common lsb-release gnupg \
+                    dkms linux-headers-$(uname -r)
 
 # ── ROCm GPG key ──────────────────────────────────────────────────────────────
 sudo mkdir --parents --mode=0755 /etc/apt/keyrings
@@ -172,6 +182,7 @@ echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stab
 sudo apt update
 sudo apt install -y grafana
 
+sudo systemctl daemon-reload
 sudo systemctl enable grafana-server
 sudo systemctl start grafana-server
 
@@ -181,7 +192,8 @@ sudo systemctl start grafana-server
 echo ""
 echo "Step 8. Install Grafana SQLite plugin"
 
-sudo grafana-cli plugins install frser-sqlite-datasource
+# grafana-cli requires --homepath in Grafana 13+
+sudo grafana-cli --homepath /usr/share/grafana plugins install frser-sqlite-datasource
 sudo systemctl restart grafana-server
 
 SERVER_IP=$(curl -s ifconfig.me)
@@ -197,7 +209,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "Step 9. Configure Grafana SQLite Data Source (manual step)"
 echo "  In Grafana: Connections -> Data Sources -> Add -> SQLite"
-echo "  Path: /home/ubuntu/vllm-mistral-rocm-bench/metrics.db"
+echo "  Path: /root/vllm-mistral-rocm-bench/metrics.db"
 
 # ════════════════════════════════════════════════════════════
 ## ✅ 10. Example Grafana Queries
@@ -216,3 +228,15 @@ echo "    SELECT prompt, avg(tokens_per_sec) AS avg_tps, avg(latency_s) AS avg_l
 echo "    FROM metrics GROUP BY prompt;"
 echo ""
 echo "deploy_all.sh completed."
+
+# ════════════════════════════════════════════════════════════
+## ✅ 11. Firewall — block external access to vLLM port 8000
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 11. Configuring firewall (ufw)"
+sudo ufw --force enable
+sudo ufw allow ssh
+sudo ufw allow 3000   # Grafana
+sudo ufw deny 8000    # vLLM — localhost only, no external access
+echo "Firewall configured. vLLM port 8000 blocked externally."
+sudo ufw status

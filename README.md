@@ -147,7 +147,7 @@ Open Grafana at `http://<server-ip>:3000` (default: admin/admin).
 
 In Grafana: **Connections → Data Sources → Add → SQLite**
 
-Path: `/home/ubuntu/vllm-mistral-rocm-bench/metrics.db`
+Path: `/root/vllm-mistral-rocm-bench/metrics.db`
 
 ---
 
