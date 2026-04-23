@@ -1,126 +1,217 @@
+#!/usr/bin/env bash
 # vllm-mistral-rocm-bench/deploy_all.sh
-
 # Execution:   bash deploy_all.sh
+# Updated:     20260423  (ROCm 7.2.2, vLLM 0.19.1, Grafana 13.0.1)
 
-# vLLM Mistral-7B-Instruct Benchmark (ROCm, No Docker)
+set -euo pipefail
 
+# ─────────────────────────────────────────────
+# Detect Ubuntu release (24.04 = noble, 22.04 = jammy)
+# ─────────────────────────────────────────────
+UBUNTU_CODENAME=$(lsb_release -sc)   # e.g. "noble" or "jammy"
+UBUNTU_VERSION=$(lsb_release -sr)    # e.g. "24.04" or "22.04"
+
+echo "Detected Ubuntu ${UBUNTU_VERSION} (${UBUNTU_CODENAME})"
+
+if [[ "$UBUNTU_CODENAME" != "noble" && "$UBUNTU_CODENAME" != "jammy" ]]; then
+    echo "ERROR: Only Ubuntu 24.04 (noble) and 22.04 (jammy) are supported."
+    exit 1
+fi
+
+ROCM_VERSION="7.2.2"
+VLLM_VERSION="0.19.1"
+ROCM_WHEEL_TAG="rocm721"           # vLLM wheel tag for ROCm 7.2.x
+
+# ─────────────────────────────────────────────
 # Package Contents
-
+# ─────────────────────────────────────────────
 # vLLM server (ROCm native, no containers)
 # Mistral-7B-Instruct-v0.2 model loading
 # Python benchmarking client
 # Tokens/sec + latency measurement
 # Log parsing
-# SQL storage (SQLite for simplicity, zero dependencies)
-# Grafana visualization (Grafana OSS installed natively, no Docker)
+# SQL storage (SQLite, zero dependencies)
+# Grafana 13 visualization (Grafana OSS, no Docker)
 
+# ─────────────────────────────────────────────
 # Execution Flow
+# ─────────────────────────────────────────────
+# 1. Install ROCm 7.2.2 (OS-specific apt repo)
+# 2. Create Python venv, install vLLM 0.19.1 ROCm wheel (bundles PyTorch)
+# 3. Download Mistral-7B-Instruct-v0.2 weights
+# 4. Start vLLM server
+# 5. Run Python benchmark client
+# 6. Store metrics in SQLite
+# 7. Install Grafana 13 (apt repo, no hardcoded .deb)
+# 8. Configure SQLite datasource + print dashboard queries
 
-#  1. Run vLLM server with Mistral-7B-Instruct-v0.2 (ROCm)
-#  2. Python client sends prompts, measures:
-#     - latency
-#     - tokens/sec
-#  3. Logs stored in JSONL
-#  4. Logs parsed into SQLite
-#  5. Grafana visualizes metrics (via SQLite plugin)
-
-## ✅ 1. System Preparation (Ubuntu ROCm 7.2)
-echo "Step 1. System Preparation (Ubuntu ROCm 7.2)"
+# ════════════════════════════════════════════════════════════
+## ✅ 1. System Preparation + ROCm 7.2.2
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 1. System Preparation + ROCm ${ROCM_VERSION} (Ubuntu ${UBUNTU_VERSION})"
 sudo apt update
-sudo apt install -y python3 python3-venv python3-dev gcc g++ make git wget curl
+sudo apt install -y python3 python3-venv python3-dev gcc g++ make git wget curl \
+                    apt-transport-https software-properties-common lsb-release gnupg
 
-## ✅ 2. Install ROCm‑compatible PyTorch
-echo "Step 2. Install ROCm‑compatible PyTorch"
+# ── ROCm GPG key ──────────────────────────────────────────────────────────────
+sudo mkdir --parents --mode=0755 /etc/apt/keyrings
+wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | \
+    gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+
+# ── ROCm apt sources (codename-specific) ─────────────────────────────────────
+sudo tee /etc/apt/sources.list.d/rocm.list << EOF
+deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} ${UBUNTU_CODENAME} main
+deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/graphics/7.2.1/ubuntu ${UBUNTU_CODENAME} main
+EOF
+
+sudo tee /etc/apt/preferences.d/rocm-pin-600 << EOF
+Package: *
+Pin: release o=repo.radeon.com
+Pin-Priority: 600
+EOF
+
+sudo apt update
+sudo apt install -y rocm
+
+# Verify ROCm is visible
+rocm-smi || true
+echo "ROCm ${ROCM_VERSION} installed."
+
+# ════════════════════════════════════════════════════════════
+## ✅ 2. Python venv + vLLM ${VLLM_VERSION} ROCm wheel
+#        NOTE: The ROCm vLLM wheel bundles PyTorch.
+#              Do NOT install torch separately.
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 2. Python venv + vLLM ${VLLM_VERSION} (${ROCM_WHEEL_TAG} wheel)"
+
 python3 -m venv vllm_env
 source vllm_env/bin/activate
 
 pip install --upgrade pip
+
+# Install vLLM ROCm pre-built wheel (includes PyTorch 2.8 + ROCm 7.2 stack)
+pip install "vllm==${VLLM_VERSION}+${ROCM_WHEEL_TAG}" \
+    --extra-index-url "https://wheels.vllm.ai/rocm/${VLLM_VERSION}/${ROCM_WHEEL_TAG}"
+
+# Additional benchmark / utility deps
 pip install -r requirements.txt
-pip install torch --index-url https://download.pytorch.org/whl/rocm7.2
 
-## ✅ 3. Install vLLM (ROCm build)
-echo "Step 3. Install vLLM (ROCm build)"
-pip install "vllm>=0.5.0" --extra-index-url https://download.pytorch.org/whl/rocm7.2
+echo "vLLM ${VLLM_VERSION} installed."
 
-## ✅ 4. Download Mistral-7B-Instruct-v0.2 Weights (Hugging Face, no token required)
-echo "Step 4. Download Mistral-7B-Instruct-v0.2 Weights (Hugging Face)"
+# ════════════════════════════════════════════════════════════
+## ✅ 3. Download Mistral-7B-Instruct-v0.2 (Hugging Face)
+#        No HF token required for this model.
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 3. Download Mistral-7B-Instruct-v0.2 weights"
+
 pip install huggingface_hub
-# No login required for Mistral-7B-Instruct-v0.2
 mkdir -p models
 cd models
 
-# Use huggingface-cli download for better reliability on large files
-git lfs install
-git clone https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2
+if [ ! -d "Mistral-7B-Instruct-v0.2" ]; then
+    git lfs install
+    git clone https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2
+else
+    echo "Model directory already exists, skipping clone."
+fi
 
 cd ..
+echo "Model weights ready."
 
-## ✅ 5. Start vLLM Server (ROCm, no Docker)
-echo "Step 5. Start vLLM Server (ROCm, no Docker)"
+# ════════════════════════════════════════════════════════════
+## ✅ 4. Start vLLM Server (ROCm, no Docker)
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 4. Start vLLM Server (ROCm, background)"
 
-# Note: Ensure run_vllm_server.sh points to ./models/Mistral-7B-Instruct-v0.2
 chmod +x run_vllm_server.sh
-./run_vllm_server.sh
+./run_vllm_server.sh &
+VLLM_PID=$!
 
-echo "Server now listens at :  http://127.0.0.1:8000/v1"
+echo "vLLM server PID: ${VLLM_PID}"
+echo "Waiting 60 seconds for server to initialise..."
+sleep 60
 
-## ✅ 6. Python Benchmark Client (latency + tokens/sec)
-echo "Step 6. Python Benchmark Client (latency + tokens/sec)"
+echo "Server listening at: http://127.0.0.1:8000/v1"
 
-## Run Benchmark Client
+# ════════════════════════════════════════════════════════════
+## ✅ 5. Python Benchmark Client (latency + tokens/sec)
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 5. Python Benchmark Client"
+
 source vllm_env/bin/activate
-pip install openai
 python client_run.py
 
-## ✅ 7. Store Metrics in SQLite (no server required)
-echo "Step 7. Store Metrics in SQLite (no server required)"
+# ════════════════════════════════════════════════════════════
+## ✅ 6. Store Metrics in SQLite
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 6. Store Metrics in SQLite"
 
-## Parse Logs into SQLite
 python parse_and_store.py
 
-## ✅ 8. Install Grafana (native, no Docker)
-echo "Step 8. Install Grafana (native, no Docker)"
-# Install Grafana:
-wget https://dl.grafana.com/oss/release/grafana_11.0.0_amd64.deb
-sudo dpkg -i grafana_11.0.0_amd64.deb
+# ════════════════════════════════════════════════════════════
+## ✅ 7. Install Grafana 13 (via apt repo — no hardcoded .deb)
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 7. Install Grafana OSS (apt repo)"
+
+sudo mkdir -p /etc/apt/keyrings/
+wget -q -O - https://apt.grafana.com/gpg.key \
+    | gpg --dearmor \
+    | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
+
+echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" \
+    | sudo tee /etc/apt/sources.list.d/grafana.list
+
+sudo apt update
+sudo apt install -y grafana
 
 sudo systemctl enable grafana-server
 sudo systemctl start grafana-server
 
-# Install SQLite plugin:
-echo "Install SQLite plugin"
+# ════════════════════════════════════════════════════════════
+## ✅ 8. Install SQLite plugin for Grafana
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 8. Install Grafana SQLite plugin"
+
 sudo grafana-cli plugins install frser-sqlite-datasource
 sudo systemctl restart grafana-server
 
-# Open Grafana:
 SERVER_IP=$(curl -s ifconfig.me)
-echo "Server IP is $SERVER_IP"
-echo "Open Grafana at http://$SERVER_IP:3000"
-echo "user: admin"
-echo "pass: admin"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Open Grafana at:  http://${SERVER_IP}:3000"
+echo "  user: admin    pass: admin"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-## ✅ 9. Add SQLite as a Grafana Data Source
-echo "Step 9. Add SQLite as a Grafana Data Source"
-echo "Grafana supports SQLite via plugin"
+# ════════════════════════════════════════════════════════════
+## ✅ 9. Grafana SQLite Data Source
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 9. Configure Grafana SQLite Data Source (manual step)"
+echo "  In Grafana: Connections -> Data Sources -> Add -> SQLite"
+echo "  Path: /home/ubuntu/vllm-mistral-rocm-bench/metrics.db"
 
-echo "In Grafana:   Data Source -> Add -> SQLite"
-echo "In Grafana:   Path: /home/ubuntu/vllm-mistral-rocm-bench/metrics.db"
-
-# Path: /home/ubuntu/vllm-mistral-rocm-bench/metrics.db
-# Create dashboards using queries in README.
-echo "In Grafana: Create dashboards using queries in README."
-
+# ════════════════════════════════════════════════════════════
 ## ✅ 10. Example Grafana Queries
-echo "Step 10. Example Grafana Queries"
-
-echo "Grafana Query: Tokens/sec over time"
-echo "  SELECT ts AS \"time\", tokens_per_sec FROM metrics ORDER BY ts;"
-
-echo "Grafana Query: Latency over time"
-echo "  SELECT ts AS \"time\", latency_s FROM metrics ORDER BY ts;"
-
-echo "Grafana Query: Average performance per prompt"
-echo "  SELECT prompt, avg(tokens_per_sec) AS avg_tps, avg(latency_s) AS avg_latency FROM metrics GROUP BY prompt;" 
-
-echo "Program now completed."
-
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 10. Example Grafana Dashboard Queries"
+echo ""
+echo "  Tokens/sec over time:"
+echo "    SELECT ts AS \"time\", tokens_per_sec FROM metrics ORDER BY ts;"
+echo ""
+echo "  Latency over time:"
+echo "    SELECT ts AS \"time\", latency_s FROM metrics ORDER BY ts;"
+echo ""
+echo "  Average performance per prompt:"
+echo "    SELECT prompt, avg(tokens_per_sec) AS avg_tps, avg(latency_s) AS avg_latency"
+echo "    FROM metrics GROUP BY prompt;"
+echo ""
+echo "deploy_all.sh completed."

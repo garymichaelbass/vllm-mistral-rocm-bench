@@ -1,7 +1,10 @@
 # vllm-mistral-rocm-bench/requirements.txt
+# Updated: 20260423  (ROCm 7.2.2, vLLM 0.19.1)
+#
+# NOTE: PyTorch is bundled inside the vLLM ROCm wheel.
+#       Do NOT add a torch line here — it will conflict.
+#       Install vLLM first via deploy_all.sh, then pip install -r requirements.txt.
 
-torch --index-url https://download.pytorch.org/whl/rocm7.2
-vllm>=0.5.0
 openai>=1.30.0
 huggingface_hub
 sqlite-utils
