@@ -1,0 +1,15 @@
+# grafana/provisioning/dashboards/dashboards.yaml
+# Tells Grafana where to find dashboard JSON files.
+# Copied to /etc/grafana/provisioning/dashboards/ by deploy_all.sh
+
+apiVersion: 1
+
+providers:
+  - name: vllm-bench
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

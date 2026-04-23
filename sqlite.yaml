@@ -1,0 +1,15 @@
+# grafana/provisioning/datasources/sqlite.yaml
+# Auto-provisions the SQLite datasource on Grafana startup.
+# Copied to /etc/grafana/provisioning/datasources/ by deploy_all.sh
+
+apiVersion: 1
+
+datasources:
+  - name: frser-sqlite-datasource
+    type: frser-sqlite-datasource
+    access: proxy
+    isDefault: true
+    jsonData:
+      path: /var/lib/grafana/metrics.db
+    version: 1
+    editable: true

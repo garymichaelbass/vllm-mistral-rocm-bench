@@ -204,18 +204,39 @@ echo "  user: admin    pass: admin"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ════════════════════════════════════════════════════════════
-## ✅ 9. Grafana SQLite Data Source
+## ✅ 9. Provision Grafana datasource + dashboard automatically
 # ════════════════════════════════════════════════════════════
 echo ""
-echo "Step 9. Configure Grafana SQLite Data Source (manual step)"
-echo "  In Grafana: Connections -> Data Sources -> Add -> SQLite"
-echo "  Path: /root/vllm-mistral-rocm-bench/metrics.db"
+echo "Step 9. Provisioning Grafana datasource and dashboard"
+
+# ── Datasource ────────────────────────────────────────────
+sudo mkdir -p /etc/grafana/provisioning/datasources
+sudo cp grafana/provisioning/datasources/sqlite.yaml \
+        /etc/grafana/provisioning/datasources/sqlite.yaml
+
+# ── Dashboard provider ────────────────────────────────────
+sudo mkdir -p /etc/grafana/provisioning/dashboards
+sudo cp grafana/provisioning/dashboards/dashboards.yaml \
+        /etc/grafana/provisioning/dashboards/dashboards.yaml
+
+# ── Dashboard JSON ────────────────────────────────────────
+sudo mkdir -p /var/lib/grafana/dashboards
+sudo cp grafana/dashboards/mistral-bench.json \
+        /var/lib/grafana/dashboards/mistral-bench.json
+sudo chown -R grafana:grafana /var/lib/grafana/dashboards
+
+# ── Copy initial metrics db so datasource test passes ─────
+sudo cp /root/vllm-mistral-rocm-bench/metrics.db /var/lib/grafana/metrics.db
+sudo chown grafana:grafana /var/lib/grafana/metrics.db
+
+sudo systemctl restart grafana-server
+echo "Grafana provisioned. Dashboard will appear automatically."
 
 # ════════════════════════════════════════════════════════════
-## ✅ 10. Example Grafana Queries
+## ✅ 10. Example Grafana Queries (for reference)
 # ════════════════════════════════════════════════════════════
 echo ""
-echo "Step 10. Example Grafana Dashboard Queries"
+echo "Step 10. Grafana is pre-configured. Reference queries:"
 echo ""
 echo "  Tokens/sec over time:"
 echo "    SELECT ts AS \"time\", tokens_per_sec FROM metrics ORDER BY ts;"

@@ -137,17 +137,35 @@ echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stab
 sudo apt update && sudo apt install -y grafana
 sudo systemctl enable --now grafana-server
 
-sudo grafana-cli plugins install frser-sqlite-datasource
+sudo grafana-cli --homepath /usr/share/grafana plugins install frser-sqlite-datasource
 sudo systemctl restart grafana-server
 ```
 
 Open Grafana at `http://<server-ip>:3000` (default: admin/admin).
 
-### 8. SQLite Data Source
+### 8. Provision Grafana datasource + dashboard (automated)
 
-In Grafana: **Connections → Data Sources → Add → SQLite**
+`deploy_all.sh` copies the provisioning files automatically — no manual clicking required:
 
-Path: `/root/vllm-mistral-rocm-bench/metrics.db`
+```bash
+# Datasource
+sudo cp grafana/provisioning/datasources/sqlite.yaml \
+        /etc/grafana/provisioning/datasources/sqlite.yaml
+
+# Dashboard provider
+sudo cp grafana/provisioning/dashboards/dashboards.yaml \
+        /etc/grafana/provisioning/dashboards/dashboards.yaml
+
+# Dashboard JSON (3 panels: tokens/sec, latency, avg per prompt)
+sudo mkdir -p /var/lib/grafana/dashboards
+sudo cp grafana/dashboards/mistral-bench.json \
+        /var/lib/grafana/dashboards/mistral-bench.json
+sudo chown -R grafana:grafana /var/lib/grafana/dashboards
+
+sudo systemctl restart grafana-server
+```
+
+The **Mistral-7B vLLM Benchmark** dashboard appears automatically under Dashboards — no manual panel creation needed.
 
 ---
 
