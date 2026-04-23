@@ -63,7 +63,7 @@ echo "Step 1. System Preparation + ROCm ${ROCM_VERSION} (Ubuntu ${UBUNTU_VERSION
 sudo apt update
 sudo apt install -y python3 python3-venv python3-dev gcc g++ make git git-lfs wget curl \
                     apt-transport-https software-properties-common lsb-release gnupg \
-                    dkms linux-headers-$(uname -r)
+                    dkms linux-headers-$(uname -r) sqlite3
 
 # ── ROCm GPG key ──────────────────────────────────────────────────────────────
 sudo mkdir --parents --mode=0755 /etc/apt/keyrings
