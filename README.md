@@ -1,4 +1,4 @@
-# vllm-mistral-rocm-bench/README.md
+# vllm_bench/README.md
 
 # vLLM Mistral-7B-Instruct Benchmark (ROCm, No Docker)
 
@@ -54,7 +54,7 @@ git clone https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2
 ## ✅ 5. Start vLLM Server (ROCm, no Docker)
 echo "Step 5. Start vLLM Server (ROCm, no Docker)"
 
-# Note: Ensure run_vllm_server.sh points to ./models/Mistral-7B-Instruct-v0.2
+# Note: Ensure run_vllm_server.sh is updated to point to ./models/Mistral-7B-v0.2
 chmod +x run_vllm_server.sh
 ./run_vllm_server.sh
 
