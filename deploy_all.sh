@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # vllm-mistral-rocm-bench/deploy_all.sh
 # Execution:   bash deploy_all.sh
-# Updated:     20260423  (ROCm 7.2.2, vLLM 0.19.1, Grafana 13.0.1)
+# Updated:     20260424  (ROCm 7.2.2, vLLM 0.19.1, Grafana 13.0.1)
+#              20260424  Step 5 → bench_runner.py; Step 10 → corrected column names
 
 set -euo pipefail
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Detect Ubuntu release (24.04 = noble, 22.04 = jammy)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 UBUNTU_CODENAME=$(lsb_release -sc)   # e.g. "noble" or "jammy"
 UBUNTU_VERSION=$(lsb_release -sr)    # e.g. "24.04" or "22.04"
 
@@ -18,10 +19,10 @@ if [[ "$UBUNTU_CODENAME" != "noble" && "$UBUNTU_CODENAME" != "jammy" ]]; then
     exit 1
 fi
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Stop unattended-upgrades immediately — it grabs the apt lock on first boot
 # and will block every apt command below for 10-20 minutes if left running.
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 echo "Stopping unattended-upgrades to free apt lock..."
 sudo systemctl stop unattended-upgrades
 sudo systemctl disable unattended-upgrades
@@ -32,28 +33,31 @@ ROCM_VERSION="7.2.2"
 VLLM_VERSION="0.19.1"
 ROCM_WHEEL_TAG="rocm721"           # vLLM wheel tag for ROCm 7.2.x
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Package Contents
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # vLLM server (ROCm native, no containers)
 # Mistral-7B-Instruct-v0.2 model loading
-# Python benchmarking client
-# Tokens/sec + latency measurement
+# Python benchmarking client (bench_runner.py)
+# TTFT + E2E latency + tokens/sec + P50/P95/P99 measurement
 # Log parsing
 # SQL storage (SQLite, zero dependencies)
 # Grafana 13 visualization (Grafana OSS, no Docker)
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Execution Flow
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # 1. Install ROCm 7.2.2 (OS-specific apt repo)
 # 2. Create Python venv, install vLLM 0.19.1 ROCm wheel (bundles PyTorch)
 # 3. Download Mistral-7B-Instruct-v0.2 weights
 # 4. Start vLLM server
-# 5. Run Python benchmark client
+# 5. Run bench_runner.py (replaces client_run.py)
 # 6. Store metrics in SQLite
-# 7. Install Grafana 13 (apt repo, no hardcoded .deb)
-# 8. Configure SQLite datasource + print dashboard queries
+# 7. Install Grafana 13 (apt repo, no Docker)
+# 8. Configure SQLite datasource + dashboard
+# 9. Provision Grafana datasource + dashboard
+# 10. Print corrected reference queries (e2e_latency_s, completion_tps)
+# 11. Configure firewall
 
 # ════════════════════════════════════════════════════════════
 ## ✅ 1. System Preparation + ROCm 7.2.2
@@ -149,16 +153,22 @@ sleep 60
 echo "Server listening at: http://127.0.0.1:8000/v1"
 
 # ════════════════════════════════════════════════════════════
-## ✅ 5. Python Benchmark Client (latency + tokens/sec)
+## ✅ 5. Python Benchmark Client — bench_runner.py
+#        Measures: TTFT, E2E latency (P50/P95/P99),
+#        tokens/sec, GPU memory, power, tokens/joule.
+#        Prints full 7-section results report on completion.
+#        (Replaces the original client_run.py)
 # ════════════════════════════════════════════════════════════
 echo ""
-echo "Step 5. Python Benchmark Client"
+echo "Step 5. Python Benchmark Client (bench_runner.py)"
 
 source vllm_env/bin/activate
-python client_run.py
+python bench_runner.py
 
 # ════════════════════════════════════════════════════════════
 ## ✅ 6. Store Metrics in SQLite
+#        bench_runner.py auto-runs parse_and_store.py,
+#        but we run it again here to ensure the DB is current.
 # ════════════════════════════════════════════════════════════
 echo ""
 echo "Step 6. Store Metrics in SQLite"
@@ -233,20 +243,39 @@ sudo systemctl restart grafana-server
 echo "Grafana provisioned. Dashboard will appear automatically."
 
 # ════════════════════════════════════════════════════════════
-## ✅ 10. Example Grafana Queries (for reference)
+## ✅ 10. Grafana Reference Queries
+#         Column names updated to match bench_runner.py schema:
+#           e2e_latency_s   (was: latency_s)
+#           completion_tps  (was: tokens_per_sec)
 # ════════════════════════════════════════════════════════════
 echo ""
 echo "Step 10. Grafana is pre-configured. Reference queries:"
 echo ""
 echo "  Tokens/sec over time:"
-echo "    SELECT ts AS \"time\", tokens_per_sec FROM metrics ORDER BY ts;"
+echo "    SELECT ts AS \"time\", completion_tps FROM metrics ORDER BY ts;"
 echo ""
 echo "  Latency over time:"
-echo "    SELECT ts AS \"time\", latency_s FROM metrics ORDER BY ts;"
+echo "    SELECT ts AS \"time\", e2e_latency_s FROM metrics ORDER BY ts;"
+echo ""
+echo "  TTFT over time:"
+echo "    SELECT ts AS \"time\", ttft_s FROM metrics ORDER BY ts;"
 echo ""
 echo "  Average performance per prompt:"
-echo "    SELECT prompt, avg(tokens_per_sec) AS avg_tps, avg(latency_s) AS avg_latency"
+echo "    SELECT prompt,"
+echo "           avg(completion_tps)  AS avg_tps,"
+echo "           avg(e2e_latency_s)   AS avg_latency,"
+echo "           avg(ttft_s)          AS avg_ttft"
 echo "    FROM metrics GROUP BY prompt;"
+echo ""
+echo "  Overall summary:"
+echo "    SELECT"
+echo "           round(avg(e2e_latency_s),3) AS avg_latency_s,"
+echo "           round(min(e2e_latency_s),3) AS min_latency_s,"
+echo "           round(max(e2e_latency_s),3) AS max_latency_s,"
+echo "           round(avg(completion_tps),1) AS avg_tps,"
+echo "           round(max(completion_tps),1) AS peak_tps,"
+echo "           count(*)                     AS n_runs"
+echo "    FROM metrics;"
 echo ""
 echo "deploy_all.sh completed."
 
