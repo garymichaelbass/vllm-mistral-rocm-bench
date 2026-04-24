@@ -38,6 +38,7 @@ NUM_RUNS      = int(os.environ.get("BENCH_RUNS",   "5"))   # measured runs per p
 
 LOG_FILE      = "bench_logs.jsonl"
 COMPARE_CSV   = "gpu_comparison.csv"
+REPORT_CACHE  = ".bench_report_cache.json"   # temp file for --defer-report
 
 PROMPTS = [
     "Explain the concept of attention in transformers.",
@@ -557,7 +558,7 @@ def get_vllm_model_info(client: OpenAI) -> dict:
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main() -> None:
+def main(defer_report: bool = False) -> None:
     client = OpenAI(base_url=VLLM_BASE_URL, api_key="dummy")
 
     ts_iso = datetime.now(timezone.utc).isoformat()
@@ -650,17 +651,64 @@ def main() -> None:
 
     # Run parse_and_store to sync into SQLite before the display query
     try:
-        import importlib.util, sys as _sys
+        import importlib.util
         spec = importlib.util.spec_from_file_location("pas", "parse_and_store.py")
         pas  = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(pas)
     except Exception as e:
         print(f"  (parse_and_store.py auto-run failed: {e} — run it manually)")
 
+    # ── Save report cache (used by --report-only / --defer-report) ───
+    cache = {
+        "all_records": all_records,
+        "gpu_info":    gpu_info,
+        "live":        live,
+        "bench_start": bench_start,
+        "bench_end":   bench_end,
+        "json_file":   json_file,
+    }
+    with open(REPORT_CACHE, "w") as f:
+        json.dump(cache, f)
+
+    if defer_report:
+        print(f"\n  Benchmark complete. Results will be shown at end of deployment.")
+        print(f"  Summary JSON → {json_file}")
+        return
+
     # ── Full results report ──────────────────────────────────────────
     show_db_results(all_records, gpu_info, live, bench_start, bench_end)
     print(f"  Summary JSON → {json_file}")
 
 
+def report_only() -> None:
+    """Load cached benchmark data and print the results report."""
+    if not os.path.exists(REPORT_CACHE):
+        print(f"ERROR: No report cache found at '{REPORT_CACHE}'.")
+        print("       Run bench_runner.py first (without --report-only).")
+        sys.exit(1)
+
+    with open(REPORT_CACHE) as f:
+        cache = json.load(f)
+
+    show_db_results(
+        cache["all_records"],
+        cache["gpu_info"],
+        cache["live"],
+        cache["bench_start"],
+        cache["bench_end"],
+    )
+    print(f"  Summary JSON → {cache['json_file']}")
+
+    # Clean up cache after display
+    try:
+        os.remove(REPORT_CACHE)
+    except OSError:
+        pass
+
+
 if __name__ == "__main__":
-    main()
+    if "--report-only" in sys.argv:
+        report_only()
+    else:
+        defer = "--defer-report" in sys.argv
+        main(defer_report=defer)

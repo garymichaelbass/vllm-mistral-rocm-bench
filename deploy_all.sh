@@ -163,7 +163,7 @@ echo ""
 echo "Step 5. Python Benchmark Client (bench_runner.py)"
 
 source vllm_env/bin/activate
-python bench_runner.py
+python bench_runner.py --defer-report
 
 # ════════════════════════════════════════════════════════════
 ## ✅ 6. Store Metrics in SQLite
@@ -290,3 +290,12 @@ sudo ufw allow 3000   # Grafana
 sudo ufw deny 8000    # vLLM — localhost only, no external access
 echo "Firewall configured. vLLM port 8000 blocked externally."
 sudo ufw status
+
+# ════════════════════════════════════════════════════════════
+## ✅ 12. Display Benchmark Results Report
+#         Shown last so it is the final output the user sees.
+# ════════════════════════════════════════════════════════════
+echo ""
+echo "Step 12. Benchmark Results Report"
+source vllm_env/bin/activate
+python bench_runner.py --report-only
